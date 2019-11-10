@@ -1,0 +1,967 @@
+<?php
+
+/**
+ * Implements hook_install().
+ */
+function modirt_install() {
+  // Custom date formats
+  variable_set('date_format_' . MODIRT_LAB_DATE_SHORT_TYPE, MODIRT_LAB_DATE_SHORT_FORMAT);
+
+  // Default map center to center of Missouri
+  variable_set('dirt_datatable_config_map_lat', '38.341413');
+  variable_set('dirt_datatable_config_map_lon', '-92.43716');
+  variable_set('dirt_datatable_config_map_zoom', '6');
+
+  node_types_rebuild();
+
+  // Use Batch API to split up installation functions
+  $batch = array(
+    'title' => t('MO DIRT Module Installation'),
+    'operations' => array(
+      array('modirt_add_custom_node_types', array()),
+      array('modirt_add_custom_fields', array()),
+      array('modirt_add_custom_filter_groups', array()),
+      array('modirt_add_custom_column_groups', array()),
+      array('modirt_add_fields_to_search_table', array()),
+    ),
+    'finished' => 'modirt_batch_install_finished',
+    'init_message' => t('Installing MO DIRT Module...'),
+    'progress_message' => t('Installing module content...'),
+    'error_message' => t('An error occurred while installing MO DIRT Module.'),
+    'file' => drupal_get_path('module', 'modirt') . '/modirt.install',
+  );
+
+  batch_set($batch);
+}
+
+
+/**
+ * Implements hook_uninstall().
+ */
+function modirt_uninstall() {
+  // Reset map center to center of US after it was changed in this module,
+  // clear map API key, and default to map not displayed.
+  variable_set('dirt_datatable_config_map_lat', '39.8283');
+  variable_set('dirt_datatable_config_map_lon', '-98.5795');
+  variable_set('dirt_datatable_config_map_zoom', '5');
+  variable_set('dirt_datatable_config_map_api_key', '');
+  variable_set('dirt_datatable_config_display_map', 0);
+
+  // Use Batch API to split up uninstall functions because it
+  // takes a while to run everything.
+  $batch = array(
+    'title' => t('MO DIRT Module Removal'),
+    'operations' => array(
+      array('modirt_delete_custom_nodes', array()),
+      array('modirt_delete_schema_changes', array()),
+      array('modirt_delete_custom_fields', array()),
+      array('modirt_delete_custom_node_types', array()),
+      array('modirt_delete_custom_variables', array()),
+      array('modirt_delete_custom_field_groups', array()),
+      array('modirt_delete_custom_date_formats', array()),
+      array('modirt_cache_clear', array()),
+    ),
+    'finished' => 'modirt_batch_uninstall_finished',
+    'init_message' => t('Unistalling MO DIRT Module...'),
+    'progress_message' => t('Unintalling module content...'),
+    'error_message' => t('An error occurred while uninstalling MO DIRT Module.'),
+    'file' => drupal_get_path('module', 'modirt') . '/modirt.install',
+  );
+
+  batch_set($batch);
+}
+
+
+/**
+ * Implements hook_enable().
+ */
+function modirt_enable() {
+  // Currently not needed, leaving as placeholder
+}
+
+
+/**
+ * Implements hook_disable().
+ */
+function modirt_disable() {
+  // Display warning about orphaned fields
+  drupal_set_message(t('Warning: the MO DIRT module has been disabled, but ' .
+    'it must be') . ' ' . l(t('uninstalled'), 'admin/modules/uninstall') . ' ' .
+    t('to remove all changes to the database. Until the module is ' .
+    'uninstalled, the custom fields will remain in the database but not ' .
+    'attached to any bundle, which may cause errors (e.g., when viewing the ' .
+    'field list).'), 'warning');
+}
+
+
+/**
+ * Implements hook_requirements().
+ *
+ * MO DIRT module requires PHPExcel library for uploading lab results
+ * spreadsheets.
+ *
+ * TODO: Update to using PhpSpreadsheet instead of PHPExcel.
+ */
+function modirt_requirements($phase) {
+  $requirements = array();
+  $t = get_t();
+
+  switch($phase) {
+    case 'runtime':
+      $library = libraries_detect('PHPExcel');
+
+      // First check: PHPExcel library installed?
+      if ($library && $library['installed']) {
+        $version = $library['version'];
+
+        // Second check: is PHPExcel library version >= 1.7?
+        if (version_compare($version, '1.7.0') >= 0) {
+          $requirements['modirt_php_excel'] = array(
+            'title' => 'PHPExcel',
+            'value' => $library['version'],
+            'severity' => REQUIREMENT_OK,
+          );
+        }
+        else {
+          $error_msg = t('PHPExcel version >= 1.7 is required by the MO DIRT ' .
+            'module. Current version is @v.', array('@v' => $version));
+
+          $requirements['modirt_php_excel'] = array(
+            'title' => 'PHPExcel',
+            'value' => $error_msg,
+            'severity' => REQUIREMENT_ERROR,
+          );
+        }
+      }
+      else {
+        $error_msg = t('PHPExcel is not installed. Version >= 1.7 is required ' .
+                       'by the MO DIRT module.');
+        $requirements['modirt_php_excel'] = array(
+          'title' => 'PHPExcel',
+          'value' => $error_msg,
+          'severity' => REQUIREMENT_ERROR,
+        );
+      }
+      break;
+  }
+
+  return $requirements;
+}
+
+
+/**
+ * Module installation batch completed callback.
+ */
+function modirt_batch_install_finished($success, $results, $operations) {
+  if ($success) {
+    $msg = t('Installed MO DIRT Module.' .
+             '<br>Check the ' . l(t('site log'), 'admin/reports/dblog') .
+             ' to verify that no errors occurred during installation.');
+    drupal_set_message($msg);
+  }
+  else {
+    drupal_set_message(t('An error occurred while attempting to install MO ' .
+      'DIRT Module'), 'error');
+  }
+}
+
+
+/**
+ * Implements hook_schema_alter().
+ *
+ * Adds the new survey fields to the search table schema.
+ */
+function modirt_schema_alter(&$schema) {
+  module_load_include('module', 'modirt');
+  module_load_include('inc', 'modirt', 'includes/modirt.fields');
+
+  // Add table column for each new survey field instance
+  foreach(modirt_get_installed_survey_field_names() as $field_name) {
+    $columns = dirt_datatable_get_column_metadata_from_active_node_field($field_name, TRUE);
+    foreach($columns as $column_name => $column_info) {
+      dirt_datatable_add_column_to_data_table_schema($column_info, $schema);
+    }
+  }
+}
+
+
+/**
+ * Removes schema changes to data table.
+ *
+ * @param[in,out] context Array containing information about the status of the
+ *  batch. Values in $context will retain their values as the batch progresses.
+ */
+function modirt_delete_schema_changes(&$context) {
+  $context['message'] = 'Removing MODIRT table schema changes';
+
+  module_load_include('module', 'modirt');
+
+  $new_schema = array();
+  modirt_schema_alter($new_schema);
+
+  if (isset($new_schema[DIRT_SEARCH_TABLE_DATA]['fields'])) {
+    foreach($new_schema[DIRT_SEARCH_TABLE_DATA]['fields'] as $field_name => $field_spec) {
+      db_drop_field(DIRT_SEARCH_TABLE_DATA, $field_name);
+    }
+  }
+}
+
+
+/**
+ * Adds custom content types.
+ *
+ * @param[in,out] context Array containing information about the status of the
+ *  batch. Values in $context will retain their values as the batch progresses.
+ */
+function modirt_add_custom_node_types(&$context) {
+  $context['message'] = 'Adding MODIRT custom content types';
+
+  module_load_include('inc', 'modirt', 'includes/modirt.node_types');
+
+  $custom_types = modirt_get_custom_content_types();
+
+  watchdog('modirt', 'Created new content types: %surveys',
+    array('%surveys' => implode(', ', $custom_types)), WATCHDOG_INFO);
+
+  // Set additional options on custom content types:
+  foreach ($custom_types as $custom_type) {
+    // Disable comments
+    variable_set('comment_' . $custom_type, '1');
+
+    // Disable preview
+    variable_set('node_preview_' . $custom_type, 0);
+
+    // Disable promote to front page
+    variable_set('node_options_' . $custom_type, array('status'));
+
+    // Remove menu options
+    variable_set('menu_options_' . $custom_type, array());
+
+    // Disable displaying author and date info
+    variable_set('node_submitted_' . $custom_type, 0);
+  }
+
+  // Disable teaser view mode for custom node types
+  foreach ($custom_types as $type) {
+    // Get field bundle settings for survey content type
+    $settings = field_bundle_settings('node', $type);
+
+    // Get the current view mode settings
+    $view_mode_settings = field_view_mode_settings('node', $type);
+
+    // By default, view_modes should be empty, so pre-populate to default settings
+    $settings['view_modes'] = $view_mode_settings;
+
+    // Now disable the teaser mode
+    if (array_key_exists('teaser', $settings['view_modes'])) {
+      $settings['view_modes']['teaser']['custom_settings'] = FALSE;
+    }
+
+    // Save updated bundle settings
+    field_bundle_settings('node', $type, $settings);
+  }
+
+  // Add as survey types
+  try {
+    foreach(modirt_get_installed_survey_type_info() as $type => $type_info) {
+      $collection_frequency = $type_info['collection_frequency'];
+      $collection_months = $type_info['collection_months'];
+
+      // Add the survey to the database table
+      dirt_add_survey_type($type, $collection_frequency, $collection_months, TRUE);
+    }
+  }
+  catch (Exception $e) {
+    watchdog('modirt', 'An error occurred while attempting to install survey types.',
+      array(), WATCHDOG_ERROR);
+  }
+}
+
+
+/**
+ * Deletes custom content added by this module.
+ *
+ * @param[in,out] context Array containing information about the status of the
+ *  batch. Values in $context will retain their values as the batch progresses.
+ */
+function modirt_delete_custom_nodes(&$context) {
+  $context['message'] = 'Removing MODIRT custom content';
+
+  module_load_include('module', 'modirt');
+
+  $custom_types = modirt_get_custom_content_types();
+
+  watchdog('modirt', 'Removing all nodes with type(s)  %types',
+    array('%types' => implode($custom_types, ', ')), WATCHDOG_INFO);
+
+  // Query db for nodes matching custom types and delete
+  $nids = array(); // array of nids to delete
+  $query = db_select('node', 'n');
+  $query->fields('n', array('nid'));
+  $query->condition('n.type', $custom_types, 'IN');
+  $result = $query->execute()->fetchAll();
+  foreach ($result as $result_obj) {
+    $nids[] = $result_obj->nid;
+  }
+
+  node_delete_multiple($nids);
+}
+
+
+/**
+ * Deletes custom node types created in this module.
+ *
+ * @param[in,out] context Array containing information about the status of the
+ *  batch. Values in $context will retain their values as the batch progresses.
+ */
+function modirt_delete_custom_node_types(&$context) {
+  $context['message'] = 'Removing MODIRT custom node types';
+
+  module_load_include('module', 'modirt');
+  module_load_include('inc', 'modirt', 'includes/modirt.node_types');
+
+  $custom_types = modirt_get_custom_content_types();
+
+  watchdog('modirt', 'Uninstalling custom node types %types',
+    array('%types' => implode($custom_types, ', ')), WATCHDOG_INFO);
+
+  $conditions = array();
+  $conditions[0] = array(
+    'field' => 'type',
+    'value' => $custom_types,
+    'operator' => 'IN',
+  );
+
+  try {
+    $num_deleted = dirt_delete_from_database_table('node_type', $conditions);
+
+    watchdog('dirt', 'Removed %num content types.',
+      array('%num' => $num_deleted), WATCHDOG_INFO);
+  }
+  catch (Exception $e) {
+    watchdog('modirt', 'Error: unable to remove custom content types.',
+      array(), WATCHDOG_ERROR);
+  }
+
+  node_type_cache_reset();
+
+  // Additionally remove survey rows added to tables for new survey types
+  // introduced by this module.
+
+  foreach(modirt_get_installed_survey_type_info() as $type => $type_info) {
+    $conditions = array();
+    $conditions[0] = array(
+      'field' => 'survey_type',
+      'value' => $type,
+      'operator' => '=',
+    );
+
+    $num_deleted = dirt_delete_from_database_table(DIRT_SEARCH_TABLE_FILTER_GROUPS, $conditions);
+    watchdog('modirt', 'Removed %num filter groups for type %type', 
+      array('%num' => $num_deleted, '%type' => $type), WATCHDOG_INFO);
+
+    $num_deleted = dirt_delete_from_database_table(DIRT_SEARCH_TABLE_COLUMN_GROUPS, $conditions);
+    watchdog('modirt', 'Removed %num column groups for type %type',
+      array('%num' => $num_deleted, '%type' => $type), WATCHDOG_INFO);
+
+    $num_deleted = dirt_delete_from_database_table(DIRT_SEARCH_TABLE_COLUMNS, $conditions);
+    watchdog('modirt', 'Removed %num column metadata rows for type %type',
+      array('%num' => $num_deleted, '%type' => $type), WATCHDOG_INFO);
+
+    $num_deleted = dirt_delete_from_database_table(DIRT_SEARCH_TABLE_DATA, $conditions);
+    watchdog('modirt', 'Removed %num rows from data search table for type %type',
+      array('%num' => $num_deleted, '%type' => $type), WATCHDOG_INFO);
+
+    // Also remove as a survey type
+    dirt_delete_survey_type($type);
+  }
+
+  // Also delete aggregate stability filter group, column group, and column metadata.
+
+  // Filter group:
+  $conditions = array();
+  $conditions[0] = array(
+    'field' => 'fid',
+    'value' => variable_get('modirt_filter_group_fid_agg_stab', -1),
+    'operator' => '=',
+  );
+  $num_deleted = dirt_delete_from_database_table(DIRT_SEARCH_TABLE_FILTER_GROUPS, $conditions);
+  watchdog('modirt', 'Removed %num filter groups for Aggregate Stability Class',
+    array('%num' => $num_deleted), WATCHDOG_INFO);
+
+  // Column group:
+  $conditions[0] = array(
+    'field' => 'filter_group',
+    'value' => variable_get('modirt_filter_group_fid_agg_stab', -1),
+    'operator' => '=',
+  );
+  $num_deleted = dirt_delete_from_database_table(DIRT_SEARCH_TABLE_COLUMN_GROUPS, $conditions);
+  watchdog('modirt', 'Removed %num column groups for Aggregate Stability Class',
+    array('%num' => $num_deleted), WATCHDOG_INFO);
+
+  // Column metadata:
+  $conditions[0] = array(
+    'field' => 'field_name',
+    'value' => 'field_modirt_site_agg_stab',
+    'operator' => '=',
+  );
+  $num_deleted = dirt_delete_from_database_table(DIRT_SEARCH_TABLE_COLUMNS, $conditions);
+  watchdog('modirt', 'Removed %num column metadata rows for Aggregate Stability Class',
+    array('%num' => $num_deleted), WATCHDOG_INFO);
+
+}
+
+
+/**
+ * Adds custom fields.
+ *
+ * @param[in,out] context Array containing information about the status of the
+ *  batch. Values in $context will retain their values as the batch progresses.
+ */
+function modirt_add_custom_fields(&$context) {
+  $context['message'] = 'Adding MO DIRT custom fields';
+
+  module_load_include('inc', 'modirt', 'includes/modirt.fields');
+
+  // Create fields
+  foreach(modirt_get_installed_fields() as $field) {
+    field_create_field($field);
+  }
+
+  // Create field instances
+  foreach(modirt_get_installed_instances() as $fieldinstance) {
+    field_create_instance($fieldinstance);
+  }
+
+  // Update admin-only site description field group to include aggregate
+  // stability class field (form mode only)
+  $mode = 'form';
+  $group = field_group_load_field_group('group_dirt_admin_only_' . $mode, 'node', 'dirt_site_description_survey', $mode);
+  $group->children[] = 'field_modirt_site_agg_stab';
+  field_group_group_save($group);
+}
+
+
+/**
+ * Deletes custom fields.
+ *
+ * @param[in,out] context Array containing information about the status of the
+ *  batch. Values in $context will retain their values as the batch progresses.
+ */
+function modirt_delete_custom_fields(&$context) {
+  $context['message'] = 'Removing MODIRT custom fields';
+
+  module_load_include('module', 'modirt');
+  module_load_include('inc', 'modirt', 'includes/modirt.fields');
+
+  // Delete field instances and fields installed in this module
+  foreach (modirt_get_installed_instances() as $instance) {
+    field_delete_instance($instance, FALSE);
+  }
+  field_cache_clear();
+
+  // Also delete comment fields that get added to each custom type
+  $custom_types = modirt_get_custom_content_types();
+  foreach ($custom_types as $type) {
+    $field_instances = field_info_instances('comment', 'comment_node_' . $type);
+    foreach ($field_instances as $instance) {
+      field_delete_instance($instance);
+    }
+  }
+
+  // Delete custom fields
+  foreach (array_keys(modirt_get_installed_fields()) as $field) {
+    // Need to call this to prevent errors, clearing caches prevents them
+    drupal_flush_all_caches();
+    field_delete_field($field);
+  }
+
+  // Remove aggregate stability class as a member of admin-only group
+  $mode = 'form';
+  $group = field_group_load_field_group('group_dirt_admin_only_' . $mode, 'node', 'dirt_site_description_survey', $mode);
+  $group->children = array_diff($group->children, array('field_modirt_site_agg_stab'));
+  field_group_group_save($group);
+
+  field_purge_batch(500);
+}
+
+
+/**
+ * Deletes custom field groups.
+ *
+ * @param[in,out] context Array containing information about the status of the
+ *  batch. Values in $context will retain their values as the batch progresses.
+ */
+function modirt_delete_custom_field_groups(&$context) {
+  $context['message'] = 'Removing MODIRT field groups';
+
+  module_load_include('module', 'modirt');
+  module_load_include('inc', 'modirt', 'includes/modirt.field_groups');
+
+  // Load field group objects and delete
+  $field_groups = modirt_get_field_group_info();
+
+  foreach($field_groups as $group_info) {
+    $group = modirt_get_field_group_object($group_info['basename'], $group_info['bundle'], $group_info['mode']);
+
+    if (!empty($group)) {
+      // call function from field_group module:
+      field_group_group_export_delete($group);
+    }
+  }
+}
+
+
+/**
+ * Adds custom filter group.
+ *
+ * @param[in,out] context Array containing information about the status of the
+ *  batch. Values in $context will retain their values as the batch progresses.
+ */
+function modirt_add_custom_filter_groups(&$context) {
+  $context['message'] = 'Adding custom filter groups';
+
+  module_load_include('inc', 'dirt_datatable', 'includes/dirt_datatable.search_table_db_ops');
+
+  // Add new filter group for aggregate stability class
+  // Squeeze between soil core and temp & cloud cover groups:
+
+  // Get weight of soil core filter
+  $fid = variable_get('dirt_datatable_filter_group_fid_soil_core');
+  $soil_core_weight = _modirt_get_filter_group_weight($fid);
+
+  // Shift all other filter groups down one
+  if ($soil_core_weight > 0)
+    _modirt_shift_filter_groups($soil_core_weight);
+
+  $fields = array(
+   'label' => t('Aggregate Stability'),
+    'element_id' => 'agg-stab',
+    'survey_type' => 'dirt_site_description_survey',
+    'weight' => $soil_core_weight + 1,
+  );
+
+  $fid = dirt_insert_into_database_table(DIRT_SEARCH_TABLE_FILTER_GROUPS, $fields);
+
+  variable_set('modirt_filter_group_fid_agg_stab', $fid);
+
+  watchdog('modirt', 'Inserted filter group %label assigned group ID %fid',
+    array('%label' => $fields['label'], '%fid' => $fid), WATCHDOG_INFO);
+
+
+  // Add a new filter group for "lab characterization" variables:
+  $lab_survey_type = 'modirt_lab_results_survey';
+
+  // Get largest weight of variable filters so we can stick lab
+  // characterization at the end.
+  $weight = dirt_datatable_get_largest_weight_value(DIRT_SEARCH_TABLE_FILTER_GROUPS) + 1;
+
+  $fields = array(
+    'label' => t('Lab Characterization'),
+    'element_id' => 'lab-char',
+    'survey_type' => $lab_survey_type,
+    'weight' => $weight,
+  );
+
+  $fid = dirt_insert_into_database_table(DIRT_SEARCH_TABLE_FILTER_GROUPS, $fields);
+
+  // Save $fid for later lookup
+  variable_set('modirt_filter_group_fid_lab_char', $fid);
+
+  if ($fid) watchdog('modirt', 'Added new filter group %name',
+    array('%name' => $fields['label']), WATCHDOG_INFO);
+
+}
+
+
+/**
+ * Adds custom column groups.
+ *
+ * @param[in,out] context Array containing information about the status of the
+ *  batch. Values in $context will retain their values as the batch progresses.
+ */
+function modirt_add_custom_column_groups(&$context) {
+  $context['message'] = 'Adding custom column groups';
+
+  module_load_include('inc', 'dirt_datatable', 'includes/dirt_datatable.search_table_db_ops');
+
+  // Add new column group for aggregate stability class
+  // Squeeze between soil core and temp & cloud cover groups:
+
+  // Get weight of soil core group
+  $gid = variable_get('dirt_datatable_colgroup_gid_soil_core');
+  $soil_core_weight = _modirt_get_column_group_weight($gid);
+
+  // Shift all other column groups down one
+  if ($soil_core_weight > 0)
+    _modirt_shift_column_groups($soil_core_weight);
+
+  $fid = variable_get('modirt_filter_group_fid_agg_stab');
+  $fields = array(
+    'label' => t('Aggregate Stability'),
+    'class' => 'agg-stab',
+    'survey_type' => 'dirt_site_description_survey',
+    'filter_group' => $fid,
+    'weight' => $soil_core_weight + 1,
+  );
+
+  $gid = dirt_insert_into_database_table(DIRT_SEARCH_TABLE_COLUMN_GROUPS, $fields);
+  variable_set('modirt_colgroup_gid_agg_stab', $gid);
+
+  if ($gid) watchdog('modirt', 'Added new column group %name with gid %gid',
+    array('%name' => $fields['label'], '%gid' => $gid), WATCHDOG_INFO);
+
+
+  // Add a new column group for lab characterization:
+  $lab_survey_type = 'modirt_lab_results_survey';
+
+  // Similar to above, get largest weight of current column groups
+  $weight = dirt_datatable_get_largest_weight_value(DIRT_SEARCH_TABLE_COLUMN_GROUPS) + 1;
+
+  $fields = array(
+    'label' => t("Lab Characterization at the University of Missouri-Columbia (Soil Testing MU-Extension and Dr. Kristen Veum's Lab)"),
+    'class' => '',
+    'survey_type' => $lab_survey_type,
+    'filter_group' => variable_get('modirt_filter_group_fid_lab_char', 0),
+    'weight' => $weight,
+  );
+  
+  $gid = dirt_insert_into_database_table(DIRT_SEARCH_TABLE_COLUMN_GROUPS, $fields);
+
+  // Save gid for later lookup
+  variable_set('modirt_colgroup_gid_lab_char', $gid);
+
+  if ($gid) watchdog('modirt', 'Added new column group %name with gid %gid',
+    array('%name' => $fields['label'], '%gid' => $gid), WATCHDOG_INFO);
+}
+
+
+/**
+ * Adds new fields to search table. Updates table schema and adds rows to
+ * column metadata for each new field.
+ *
+ * @param[in,out] context Array containing information about the status of the
+ *  batch. Values in $context will retain their values as the batch progresses.
+ */
+function modirt_add_fields_to_search_table(&$context) {
+  $context['message'] = 'Adding new fields to data search table';
+
+  module_load_include('inc', 'modirt', 'includes/modirt.fields');
+
+  // Update DataTable schema to include new survey and its fields
+  $new_schema = array();
+
+  // Get new fields installed in this module.
+  modirt_schema_alter($new_schema);
+
+  // Add columns to the data search table for these new fields.
+  if (isset($new_schema[DIRT_SEARCH_TABLE_DATA]['fields'])) {
+    foreach($new_schema[DIRT_SEARCH_TABLE_DATA]['fields'] as $field_name => $field_spec) {
+      db_add_field(DIRT_SEARCH_TABLE_DATA, $field_name, $field_spec);
+    }
+  }
+
+  // Add rows to the column metadata table for the new fields.
+  // Since all are lab fields except aggregate stability, split into
+  // two cases (rather than doing this more generally).
+
+  $lab_fields = array_diff(modirt_get_installed_survey_field_names(), array('field_modirt_site_agg_stab'));
+
+  // Lab fields first:
+  $weight = 0; // weight counter
+
+  foreach($lab_fields as $field_name) {
+    $columns = dirt_datatable_get_column_metadata_from_active_node_field($field_name);
+    foreach($columns as $column_name => $column_info) {
+      $suggested_label = _modirt_get_suggested_column_label($column_info['field_name']);
+      if ($suggested_label) $column_info['label'] = $suggested_label;
+      $column_info['weight'] = $weight;
+      $column_info['colgroup'] = variable_get('modirt_colgroup_gid_lab_char', 0);
+      dirt_datatable_add_column_metadata_for_field($column_info);
+      $weight += 1;
+    }
+  }
+
+  // Next handle aggregrate stability field as a special case.
+  $columns = dirt_datatable_get_column_metadata_from_active_node_field('field_modirt_site_agg_stab');
+  foreach($columns as $column_name => $column_info) {
+    $column_info['weight'] = 0;
+    $column_info['colgroup'] = variable_get('modirt_colgroup_gid_agg_stab', 0);
+    dirt_datatable_add_column_metadata_for_field($column_info);
+  }
+}
+
+
+/**
+ * Deletes custom variables.
+ *
+ * @param[in,out] context Array containing information about the status of the
+ *  batch. Values in $context will retain their values as the batch progresses.
+ */
+function modirt_delete_custom_variables(&$context) {
+  $context['message'] = 'Removing MODIRT custom variables';
+
+  module_load_include('module', 'modirt');
+
+  // Delete custom variables set by this module
+  // Query database for all variables set by this module,
+  // identified by beginning with "modirt_"
+
+  $conditions = array();
+  $conditions[0] = array(
+    'field' => 'name',
+    'value' => 'modirt_%',
+    'operator' => 'LIKE',
+  );
+
+  try {
+    $num_deleted = dirt_delete_from_database_table('variable', $conditions);
+
+    watchdog('modirt', 'Removed %num variable(s)',
+      array('%num' => $num_deleted), WATCHDOG_INFO);
+  }
+  catch (Exception $e) {
+    watchdog('modirt', 'Error: unable to delete MO DIRT variables.',
+      array(), WATCHDOG_ERROR);
+  }
+
+  // Additionally delete variables for custom content types
+  $custom_types = modirt_get_custom_content_types();
+  foreach ($custom_types as $custom_type) {
+    variable_del('comment_' . $custom_type);
+    variable_del('node_preview_' . $custom_type);
+    variable_del('node_options_' . $custom_type);
+    variable_del('menu_options_' . $custom_type);
+    variable_del('field_bundle_settings_node__' . $custom_type);
+  }
+}
+
+
+/**
+ * Delete custom date formats.
+ *
+ * @param[in,out] context Array containing information about the status of the
+ *  batch. Values in $context will retain their values as the batch progresses.
+ */
+function modirt_delete_custom_date_formats(&$context) {
+  $context['message'] = 'Removing MO DIRT date formats';
+
+  module_load_include('module', 'modirt');
+
+  // Remove date format types
+  $conditions = array();
+  $conditions[0] = array(
+    'field' => 'type',
+    'value' => MODIRT_LAB_DATE_SHORT_TYPE,
+    'operator' => '=',
+  );
+
+  try {
+    $num_deleted = dirt_delete_from_database_table('date_format_type', $conditions);
+
+    watchdog('modirt', 'Removed %num date format type(s)',
+      array('%num' => $num_deleted), WATCHDOG_INFO);
+  }
+  catch (Exception $e) {
+    watchdog('modirt', 'Error: unable to remove MO DIRT date format type(s).',
+      array(), WATCHDOG_ERROR);
+  }
+
+  variable_del('date_format_MODIRT_LAB_DATE_SHORT_TYPE');
+
+  // Remove date formats
+  $conditions = array();
+  $conditions[0] = array(
+    'field' => 'format',
+    'value' => MODIRT_LAB_DATE_SHORT_FORMAT,
+    'operator' => '=',
+  );
+ 
+  try {
+    $num_deleted = dirt_delete_from_database_table('date_formats', $conditions);
+
+    watchdog('modirt', 'Removed %num date format(s)',
+      array('%num' => $num_deleted), WATCHDOG_INFO);
+  }
+  catch (Exception $e) {
+    watchdog('modirt', 'Error: unable to remove MO DIRT date format(s).',
+      array(), WATCHDOG_ERROR);
+  }
+}
+
+
+/**
+ * Helper function to get filter group weight for filter group ID.
+ *
+ * @param[in] $fid Filter group ID.
+ *
+ * @retval Integer filter group weight (defaults to 0 if not found).
+ */
+function _modirt_get_filter_group_weight($fid) {
+  return _modirt_get_table_group_weight($fid, DIRT_SEARCH_TABLE_FILTER_GROUPS, 'fid');
+}
+
+
+/**
+ * Helper function to get column group weight for column group ID.
+ *
+ * @param[in] $gid Column group ID.
+ *
+ * @retval Integer column group weight (defaults to 0 if not found).
+ */
+function _modirt_get_column_group_weight($gid) {
+  return _modirt_get_table_group_weight($gid, DIRT_SEARCH_TABLE_COLUMN_GROUPS, 'gid');
+}
+
+
+/**
+ * Helper function to get weight in table for group ID.
+ *
+ * @param[in] $id_field Name of ID field in table.
+ * @param[in] $table_name Name of database table.
+ * @param[in] $id ID field value.
+ *
+ * @retval Integer weight (defaults to 0 if not found).
+ */
+function _modirt_get_table_group_weight($id, $table_name, $id_field) {
+  $weight = 0; // Default to zero.
+
+  if (db_table_exists($table_name) && db_field_exists($table_name, 'weight')) {
+    $query = db_select($table_name, 't');
+    $query->condition('t.' . $id_field, $id);
+    $query->fields('t', array('weight'));
+    $result = $query->execute()->fetchAssoc();
+    if ($result) $weight = $result['weight'];
+  }
+
+  return $weight;
+}
+
+
+/**
+ * Helper function to shift filter group weights down by one.
+ *
+ * @param[in] $weight Shift filter groups with weight above this weight.
+ */
+function _modirt_shift_filter_groups($weight) {
+  _modirt_shift_table_groups($weight, DIRT_SEARCH_TABLE_FILTER_GROUPS, 'fid');
+}
+
+
+/**
+ * Helper function to shift column group weights down by one.
+ *
+ * @param[in] $weight Shift column groups with weight above this weight.
+ */
+function _modirt_shift_column_groups($weight) {
+   _modirt_shift_table_groups($weight, DIRT_SEARCH_TABLE_COLUMN_GROUPS, 'gid');
+}
+
+
+/**
+ * Helper function to weights down by one in a table.
+ * 
+ * @param[in] $weight Shift groups with weight above this weight.
+ * @param[in] $table_name Name of database table.
+ * @param[in] $id_field Name of ID field in table.
+ */
+function _modirt_shift_table_groups($weight, $table_name, $id_field) {
+  // Get ids for groups with larger weight
+  $ids = array();
+
+  if (db_table_exists($table_name) && db_field_exists($table_name, 'weight')) {
+    $query = db_select($table_name, 't');
+    $query->condition('t.weight', $weight, '>');
+    $query->fields('t', array($id_field, 'weight'));
+    $result = $query->execute()->fetchAll();
+
+    foreach($result as $result_obj) $ids[$result_obj->$id_field] = $result_obj->weight;
+  }
+
+  foreach($ids as $id => $weight) {
+    $fields = array(
+      'weight' => $weight + 1,
+    );
+
+    $conditions = array();
+    $conditions[0] = array(
+      'field' => $id_field,
+      'value' => $id,
+      'operator' => '=',
+    );
+
+    $num_updated = dirt_update_database_table($table_name, $fields, $conditions);
+
+    watchdog('modirt', 'Updated %num rows in table for field ID %fid',
+      array('%num' => $num_updated, '%fid' => $id), WATCHDOG_INFO);
+  }
+}
+
+
+/**
+ * Clear all caches (to force deletions to go through, etc.)
+ *
+ * @param[in,out] context Array containing information about the status of the
+ *  batch. Values in $context will retain their values as the batch progresses.
+ */
+function modirt_cache_clear(&$context) {
+  $context['message'] = 'Finalizing module deletion';
+
+  drupal_flush_all_caches();
+}
+
+
+/**
+ * Returns suggested (shortened) column label for field name.
+ *
+ * @param[in] $field_name Field name string.
+ *
+ * @retval String column label if suggestion found, empty string otherwise.
+ */
+function _modirt_get_suggested_column_label($field_name) {
+  switch ($field_name) {
+    case 'field_modirt_lab_nitrate':
+      return 'NO<sub>3</sub>-N ppm';
+
+    case 'field_modirt_lab_phosphorus':
+      return 'P Bray I lb/A';
+
+    case 'field_modirt_lab_phosphorus_ppm':
+      return 'P Bray I ppm';
+
+    case 'field_modirt_lab_potassium':
+      return 'K lb/A';
+
+    case 'field_modirt_lab_potassium_ppm':
+      return 'K ppm';
+
+    case 'field_modirt_lab_calcium':
+      return 'Ca lb/A';
+  
+    case 'field_modirt_lab_calcium_ppm':
+      return 'Ca ppm';
+
+    case 'field_modirt_lab_magnesium':
+      return 'Mg lb/A';
+
+    case 'field_modirt_lab_magnesium_ppm':
+      return 'Mg ppm';
+
+    case 'field_modirt_lab_organic_matter':
+      return '%OM';
+
+    case 'field_modirt_lab_cec':
+      return 'CEC meq/100g';
+
+    case 'field_modirt_lab_na':
+      return 'N.A. meq/100g';
+
+    case 'field_modirt_lab_active_carbon':
+      return 'AC (lbs/A)';
+
+    case 'field_modirt_lab_wsa':
+      return '%WSA';
+  }
+
+  return '';
+}

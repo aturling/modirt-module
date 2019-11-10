@@ -1,0 +1,462 @@
+<?php
+/*
+* @file
+* This is the main module file.
+*/
+
+
+// Define custom date type and format for lab surveys
+define('MODIRT_LAB_DATE_SHORT_TYPE', 'modirt_lab_date_short_type');
+define('MODIRT_LAB_DATE_SHORT_FORMAT', 'm/Y');
+
+// Human-readable format suggestion (separate from PHP date format)
+define('MODIRT_LAB_DATE_SHORT_HINT', 'MM/YYYY');
+
+
+/**
+ * Implements hook_node_info()
+ *
+ * Add the lab results survey type.
+ */
+function modirt_node_info() {
+  module_load_include('inc', 'modirt', 'includes/modirt.node_types');
+
+  $node_info = array();
+
+  // Add the survey content types
+  foreach(modirt_get_installed_survey_type_info() as $type => $info) {
+    $node_info[$type] = array(
+      'name' => $info['name'],
+      'base' => 'node_content',
+      'description' => $info['description'],
+      'has_title' => TRUE,
+      'locked' => TRUE,
+    );
+  }
+
+  return $node_info;
+}
+
+
+/**
+ * Implements hook_menu().
+ */
+function modirt_menu() {
+  // Lab results spreadsheet upload (add tab to existing survey config)
+  $items['admin/config/dirt/surveys/upload'] = array(
+    'title' => t('Lab Results Upload'),
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('modirt_admin_spreadsheet_upload_form'),
+    'access arguments' => array('access administration pages'),
+    'weight' => 3,
+    'type' => MENU_LOCAL_TASK,
+    'file' => 'includes/modirt.admin.inc',
+  );
+
+  return $items;
+}
+
+
+/**
+ * Implements hook_form_BASE_FORM_ID_alter().
+ *
+ * Alters form for all survey content types with MO DIRT customizations.
+ *
+ * @param[in,out] $form       Form array.
+ * @param[in,out] $form_state Form state array.
+ * @param[in]     $form_id    Form ID string.
+ */
+function modirt_form_node_form_alter(&$form, &$form_state, $form_id) {
+  form_load_include($form_state, 'inc', 'modirt', 'includes/modirt.forms');
+
+  $type = $form['#node']->type;
+
+  if (dirt_node_type_is_survey_type($type)) {
+    // Apply changes to all survey forms
+    modirt_all_survey_forms_alter($form, $form_state, $type);
+
+    // Customizations for specific survey types:
+    switch($type) {
+      case 'dirt_group_information_survey':
+        modirt_group_information_survey_form_alter($form, $form_state);
+        break;
+
+      case 'dirt_site_description_survey':
+        // Site description form customizations
+        modirt_site_description_survey_form_alter($form, $form_state);
+        break;
+
+      case 'dirt_monthly_data_survey':
+        // Monthly form customizations
+        modirt_monthly_survey_form_alter($form, $form_state);
+        break;
+
+      case 'modirt_lab_results_survey':
+        modirt_lab_results_survey_form_alter($form, $form_state);
+        break;
+    }
+  } 
+}
+
+
+/**
+ * Implements hook_form_FORM_ID_alter().
+ *
+ * Modify the user profile form.
+ *
+ * @param[in,out] $form Form array.
+ * @param[in,out] $form_state Form state array.
+ * @param[in] $form_id Form ID string.
+ */
+function modirt_form_user_profile_form_alter(&$form, &$form_state, $form_id) {
+  // Remove signature settings, if present
+  if (array_key_exists('signature_settings', $form))
+    $form['signature_settings']['#access'] = FALSE;
+}
+
+
+/**
+ * Implements hook_form_FORM_ID_alter().
+ *
+ * Modify the admin survey config form (site ID lookups).
+ *
+ * @param[in,out] $form Form array.
+ * @param[in,out] $form_state Form state array.
+ * @param[in] $form_id Form ID string.
+ */
+function modirt_form_dirt_admin_site_id_lookup_form_alter(&$form, &$form_state, $form_id) {
+  form_load_include($form_state, 'inc', 'modirt', 'includes/modirt.admin');
+  form_load_include($form_state, 'inc', 'dirt', 'includes/dirt.admin');
+
+  modirt_admin_alter_site_id_lookup_form($form, $form_state);
+}
+
+
+/**
+ * Implements hook_form_FORM_ID_alter().
+ *
+ * Add honeypot protection to the data access request form.
+ *
+ * @param[in,out] $form Form array.
+ * @param[in,out] $form_state Form state array.
+ * @param[in] $form_id Form ID string.
+ */
+function modirt_form_dirt_datatable_account_request_form_alter(&$form, &$form_state, $form_id) {
+  honeypot_add_form_protection($form, $form_state, array('honeypot', 'time_restriction'));
+}
+
+
+/**
+ * Implements hook_user_view_alter().
+ *
+ * Adds link to the data entry portal to user profile views.
+ */
+function modirt_user_view_alter(&$build) {
+  if ((arg(0) == "user") && is_numeric(arg(1))) {
+    $path = variable_get('dirt_data_entry_portal_path', DIRT_DATA_ENTRY_PATH_DEFAULT);
+    $markup = l(t('Click here to access the MO DIRT data portal'), $path);
+
+    $build['modirt_full_profile_link'] = array(
+      '#type' => 'markup',
+      '#weight' => '100', // push to bottom of profile view
+      '#markup' => $markup,
+      '#prefix' => '<div><h4>',
+      '#suffix' => '</h4></div>',
+    );
+  }
+}
+
+
+/**
+ * Implements hook_field_widget_properties_alter().
+ */
+function modirt_field_widget_properties_alter(&$widget, $context) {
+  module_load_include('inc', 'modirt', 'includes/modirt.forms');
+
+  // Change county widget from text field to "select or other":
+  $field = $context['field'];
+  if (($context['entity_type'] == 'node') && ($field['field_name'] == 'field_dirt_site_county'))
+    modirt_change_county_field_widget($widget);
+}
+
+
+/**
+ * Implements hook_theme().
+ *
+ * Overrides node template for lab survey nodes to view as summary table.
+ */
+function modirt_theme($existing, $type, $theme, $path) {
+  $theme = array();
+
+  $theme['node__modirt_lab_results_survey'] = array(
+    'render element' => 'content',
+    'base hook' => 'node',
+    'template' => 'node--modirt_lab_results_survey',
+    'path' => drupal_get_path('module', 'modirt') . '/templates',
+   );
+
+  return $theme;
+}
+
+
+/**
+ * Implements hook_node_view().
+ *
+ * Add custom CSS to node views for survey nodes.
+ */
+function modirt_node_view($node, $view_mode, $langcode) {
+  $type = $node->type;
+
+  // Add CSS to survey nodes
+  if (dirt_node_type_is_survey_type($type))
+    drupal_add_css(drupal_get_path('module', 'modirt') . '/css/modirt_form_header.css');
+
+  // Add CSS to lab results nodes
+  if ($type == 'modirt_lab_results_survey')
+    drupal_add_css(drupal_get_path('module', 'modirt') . '/css/modirt_nodes.css');
+}
+
+
+/**
+ * Implements hook_node_view_alter().
+ *
+ * Customize form header on node view.
+ */
+function modirt_node_view_alter(&$build) {
+  $type = array_key_exists('#bundle', $build) ? $build['#bundle'] : '';
+
+  if (dirt_node_type_is_survey_type($type)) {
+    module_load_include('inc', 'modirt', 'includes/modirt.forms');
+    module_load_include('inc', 'modirt', 'includes/modirt.fields');
+
+    // Get header field and markup based on survey type
+    $header_field = 'field_dirt_form_header';
+    $markup = modirt_get_common_form_header_markup($type);
+
+    // Update header:
+    if (isset($build[$header_field]))
+      $build[$header_field][0]['#markup'] = $markup;
+
+    // Additional changes per type:
+    switch($type) {
+      case 'dirt_site_description_survey':
+        // Hide date of survey on node view
+        // Safe to use #access = FALSE here because not submitting a form
+        $build['field_dirt_date_of_survey']['#access'] = FALSE;
+        break;
+
+      case 'dirt_group_information_survey':
+        // Similar to site desc surveys: hide date of survey on node view
+        // (See comments above)
+        $build['field_dirt_date_of_survey']['#access'] = FALSE;
+        break;
+
+      case 'modirt_lab_results_survey':
+        // For lab survey types, change "Submitted by" to "Created
+        // for" since participants don't submit the lab results themselves.
+        $submitted_by_markup = $build['dirt_submitted_by']['#markup'];
+        $altered_markup = str_replace('Submitted by', 'Created for', $submitted_by_markup);
+        $build['dirt_submitted_by']['#markup'] = $altered_markup;
+        break;
+    }
+  }
+}
+
+
+/**
+ * Implements hook_node_presave().
+ *
+ * Calculate the ppm values based on the lb/A values.
+ *
+ * @param[in] $node Node object about to be saved.
+ */
+function modirt_node_presave($node) {
+  if ($node->type == 'modirt_lab_results_survey') {
+    module_load_include('inc', 'modirt', 'includes/modirt.fields');
+
+    $lab_fields = modirt_get_mu_lab_field_names();
+
+    // Set ppm fields using Entity Metadata Wrapper
+    try {
+      $node_wrapper = entity_metadata_wrapper('node', $node);
+      
+      foreach($lab_fields as $field) {
+        if(substr($field, -4) === '_ppm') {
+          $field_lbA = substr($field, 0, -4);
+          $field_lbA_val = $node_wrapper->$field_lbA->value();
+          if (!is_null($field_lbA_val) && ($field_lbA_val != '')) {
+            $ppm_val = round($field_lbA_val / 2.0, 1);
+            $node_wrapper->$field->set($ppm_val);
+          }
+        }
+      }
+    }
+    catch (EntityMetadataWrapperException $e) {
+      watchdog_exception('modirt', $e);
+    }
+  }
+}
+
+
+/**
+ * Implements hook_field_group_info().
+ */
+function modirt_field_group_info() {
+  module_load_include('inc', 'modirt', 'includes/modirt.field_groups');
+
+  $export = array();
+
+  $field_groups = modirt_get_field_group_info();
+
+  foreach($field_groups as $group_info) {
+    $group = modirt_get_field_group_object($group_info['basename'], $group_info['bundle'], $group_info['mode']);
+    $key = $group->identifier;
+    if (!empty($group)) $export[$key] = $group;
+  }
+
+  return $export;
+}
+
+
+/**
+ * Implements hook_module_implements_alter().
+ *
+ * Ensures that modirt form alter is called after dirt form alter.
+ *
+ * @param[in,out] $implementations An array keyed by the module's name.
+ * @param[in] $hook The name of the module hook being implemented.
+ */
+function modirt_module_implements_alter(&$implementations, $hook) {
+  if ( ($hook == 'form_alter') && array_key_exists('modirt', $implementations)) {
+    // Move modirt's form alter to the end of the list:
+    $group = $implementations['modirt'];
+    unset($implementations['modirt']);
+    $implementations['modirt'] = $group; 
+  }
+}
+
+
+/**
+ * Implements hook_page_alter().
+ *
+ * Adds MO DIRT customizations to the data search portal page.
+ */
+function modirt_page_alter(&$page) {
+  if (current_path() === variable_get('dirt_data_search_portal_path')) {
+    module_load_include('inc', 'modirt', 'includes/modirt.data_portal');
+    modirt_data_search_portal_alter($page);
+  }
+  elseif (current_path() === variable_get('dirt_data_entry_portal_path')) {
+    module_load_include('inc', 'modirt', 'includes/modirt.data_portal');
+    modirt_data_entry_portal_alter($page);
+  }
+}
+
+
+/**
+ * Implements hook_views_api().
+ */
+function modirt_views_api() {
+  return array(
+    'api' => '3.0',
+  );
+}
+
+
+/**
+ * Implements hook_views_default_views().
+ */    
+function modirt_views_default_views() {
+  $views = array();
+
+  $files = file_scan_directory(drupal_get_path('module', 'modirt') . '/views', '/.*\.view$/');
+
+  foreach($files as $path => $file) {
+    require_once $path;
+    if (isset($view)) $views[$view->name] = $view;
+  }
+
+  return $views;
+}
+
+
+/**
+ * Implements hook_ctools_plugin_api().
+ */
+function modirt_ctools_plugin_api($owner, $api) {
+  if ($owner == 'field_group' && $api == 'field_group') {
+    return array('version' => 1);
+  }
+}
+
+
+/**
+ * Implements hook_libraries_info().
+ *
+ * Provides information to Libraries API on PHPExcel library.
+ */
+function modirt_libraries_info() {
+  $libraries['PHPExcel'] = array(
+    'name' => 'PHPExcel',
+    'vendor url' => 'https://github.com/PHPOffice/PHPExcel',
+    'download url' => 'https://github.com/PHPOffice/PHPExcel/releases',
+    'version arguments' => array(
+      'file' => 'changelog.txt',
+      'pattern' => '/@version\s+([0-9\.]+)/',
+      'lines' => 22,
+    ),
+    'files' => array(
+      'php' => array('Classes/PHPExcel.php'),
+    ),
+  );
+
+  return $libraries;
+}
+
+
+/**
+ * Implements hook_help().
+ */
+function modirt_help($path, $arg) {
+  switch($path) {
+    case 'admin/help#modirt':
+      $output  = '';
+      $output .= '<h3>' . t('About') . '</h3>';
+      $output .= '<p>' . t('The MO DIRT module extends the DIRT Citizen ' .
+        'Science and DIRT DataTable modules with customizations specific to ' .
+        'the ' . l(t('MO DIRT project'), 'https://modirt.missouriepscor.org') .
+        '. In particular, this module adds a new content type that stores ' .
+        'lab results and includes a form that allows site admins to upload ' .
+        'spreadsheets to populate lab results for multiple collection sites. ' .
+        'It also makes small location-specific changes to the basic DIRT ' .
+        'module, e.g., sets the default site state to Missouri, sets the ' .
+        'data search portal map center to the center of Missouri, etc.');
+      $output .= '</p>';
+      $output .= '<h3>' . t('Uses') . '</h3>';
+      $output .= '<dl>';
+      $output .= '<dt>' . t('Collecting citizen science survey data in ' .
+        'Missouri') . '</dt>';
+      $output .= '<dd>' . t('This module customizes the core DIRT module to ' .
+        'set the collection location to the state of Missouri.') . '</dd>';
+      $output .= '<dt>' . t('Collecting soil lab data') . '</dt>';
+      $output .= '<dd>' . t('A new survey type is added to store the ' .
+        'results of soil lab analysis variables. New variable filters and ' .
+        'column groups in the data search portal table are added for the ' .
+        'lab data.') . '</dd>';
+      $output .= '<dt>' . t('Updating select site description fields') . '</dt>';
+      $output .= '<dd>' . t('The site description survey is modified to ' .
+        'allow some fields to be updated from time to time as needed, e.g., ' .
+        'present and past land management.') . '</dd>';
+      $output .= '</dl>';
+      return $output;
+  }
+}
+
+
+/**
+ * Returns a list of all content types created in this module.
+ */
+function modirt_get_custom_content_types() {
+  return array_keys(modirt_node_info());
+}
+

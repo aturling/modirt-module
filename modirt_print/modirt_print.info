@@ -1,0 +1,10 @@
+name = MO DIRT Printer-Friendly Surveys
+description = Extends the MO DIRT module to add printer-friendly PDF versions of surveys using the <a href="https://www.drupal.org/project/print" target="_blank">Printer, email and PDF versions</a> contributed Drupal module and the <a href="https://dompdf.github.io/" target=_blank">dompdf</a> tool that converts HTML to PDF.
+package = "DIRT Citizen Science Modules"
+core = 7.x
+version = "7.x-1.0"
+
+dependencies[] = modirt
+dependencies[] = print
+dependencies[] = print_pdf
+dependencies[] = print_pdf_dompdf

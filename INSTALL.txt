@@ -1,0 +1,10 @@
+INSTALLATION
+------------
+
+ * Install as you would normally install a contributed Drupal module. Visit
+   https://www.drupal.org/documentation/install/modules-themes/modules-7
+   for further information.
+
+   Note: this module must be installed through the Drupal interface. The
+   installation uses the Batch API which is not compatible with installing with
+   drush or other command line tools.

@@ -1,0 +1,129 @@
+<?php
+
+/**
+ * Implements hook_install().
+ */
+function modirt_print_install() {
+  // Set variable defaults for print module:
+  $lib_path = libraries_get_path('dompdf');
+  if ($lib_path) {
+    // Use dompdf tool
+    $tool_path = key(file_scan_directory($lib_path, '!^Dompdf.php$!'));
+    variable_set('print_pdf_pdf_tool', 'print_pdf_dompdf|' . $tool_path);
+  }
+  variable_set('print_pdf_content_disposition', 1); // Open PDFs in new window
+  variable_set('print_pdf_display_sys_urllist', 0); // Disable URLs in system
+  variable_set('print_urls', 0); // Disable printer-friendly URLs list
+  variable_set('print_logo_options', 0); // Disable logo in PDF
+  variable_set('print_footer_options', 0); // Disable site footer in PDF
+  variable_set('print_sourceurl_enabled', 0); // Disable print source URL in PDF
+
+  // Give data entry users permission to access PDFs
+  $data_entry_user_rid = variable_get('dirt_data_entry_user_role');
+  $allowed_actions = array('access PDF version');
+  user_role_grant_permissions($data_entry_user_rid, $allowed_actions);
+
+  // Enable print view mode on survey types
+  module_load_include('inc', 'field_ui', 'field_ui.admin');
+  $survey_types = dirt_get_survey_types();
+  if (PRINT_VIEW_MODE) {
+    foreach($survey_types as $bundle) {
+      $bundle_settings = field_bundle_settings('node', $bundle);
+      $bundle_settings['view_modes'][PRINT_VIEW_MODE]['custom_settings'] = TRUE;
+      field_bundle_settings('node', $bundle, $bundle_settings);
+    }
+  }
+
+  // Update field instances to include print display
+  // Use of field_info_instances() is discouraged but needed here
+  foreach($survey_types as $type) {
+    $instances = field_info_instances('node', $type);
+    modirt_print_update_instances($instances);
+    unset($instances);
+  }
+}
+
+
+/**
+ * Implements hook_uninstall().
+ */
+function modirt_print_uninstall() {
+  // Delete field groups
+  modirt_print_delete_custom_field_groups();
+
+  // Clear caches
+  modirt_print_cache_clear();
+}
+
+
+/**
+ * Implements hook_enable().
+ */
+function modirt_print_enable() {
+  // Placeholder
+}
+
+
+/**
+ * Implements hook_disable().
+ */
+function modirt_print_disable() {
+  // Placeholder
+}
+
+
+/**
+ * Updates instances to include print view mode.
+ *
+ * @param[in] $instances Array of field instance arrays to be updated.
+ */
+function modirt_print_update_instances($instances) {
+  module_load_include('inc', 'modirt_print', 'includes/modirt_print.fields');
+
+  // Get print instances for comparison
+  $modirt_print_instances = modirt_print_get_instances();
+
+  // For each existing instance, if print mode specified, add it to existing
+  // display.
+  foreach($instances as $key => $instance) {
+    // Exclude user fields
+    if ($instance['entity_type'] != 'user') {
+      // First copy default display to print
+      $instance['display'][PRINT_VIEW_MODE] = $instance['display']['default'];
+
+      if (array_key_exists($key, $modirt_print_instances))
+        $instance['display'][PRINT_VIEW_MODE] = array_merge($instance['display'][PRINT_VIEW_MODE], $modirt_print_instances[$key]['display'][PRINT_VIEW_MODE]);
+
+      // Update instance
+      field_update_instance($instance);
+    }
+  }
+}
+
+
+/**
+ * Deletes custom print field groups.
+ */
+function modirt_print_delete_custom_field_groups() {
+  module_load_include('module', 'modirt_print');
+  module_load_include('inc', 'modirt_print', 'includes/modirt_print.field_groups');
+
+  // Load field group objects and delete
+  $field_groups = modirt_print_get_field_group_info();
+  $group_objects = modirt_print_get_field_group_objects($field_groups);
+
+  foreach($group_objects as $group) {
+    if (!empty($group)) {
+      // call function from field_group module:
+      field_group_group_export_delete($group);
+    }
+  }
+}
+
+
+/**
+ * Clear all caches (to force deletions to go through, etc.)
+ */
+function modirt_print_cache_clear() {
+  drupal_flush_all_caches();
+}

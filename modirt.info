@@ -1,0 +1,10 @@
+name = MO DIRT Citizen Science Module
+description = Extends the MO DIRT Core and DataTable modules with content custom to the <a href="https://modirt.missouriepscor.org/" target="_blank">MO DIRT Citizen Science project</a>.
+package = "DIRT Citizen Science Modules"
+core = 7.x
+version = "7.x-1.0"
+
+dependencies[] = dirt
+dependencies[] = dirt_datatable
+dependencies[] = honeypot
+dependencies[] = views

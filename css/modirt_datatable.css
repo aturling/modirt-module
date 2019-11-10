@@ -1,0 +1,30 @@
+/* MO DIRT customizations to data search table */
+table th {
+  background-color: #ffffff!important;
+}
+/* need to scoot these up a bit to give the superscripts/subscripts some space */
+th.var-filter-soil-resp,
+th.modirt-lab-nitrate {
+  line-height: 1.6;
+}
+th.dirt-volume-soil-sample,
+th.dirt-soil-bulk-density,
+th.dirt-total-soil-porosity {
+  line-height: 1.8;
+}
+#welcome-username {
+  padding-bottom: 10px;
+}
+#node-3 p {
+  margin-bottom: 15px;
+}
+#instructions-links {
+  font-family: "Open Sans", "Segoe UI", "Helvetica", sans-serif;
+  font-weight: 300;
+  margin: 0 0 20px;
+  font-size: 14px;
+}
+#about-login form,
+#about-login div#edit-actions {
+  margin-bottom: 10px;
+}

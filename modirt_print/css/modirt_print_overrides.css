@@ -1,0 +1,34 @@
+.print-content table.field-collection-table-view,
+.print-content table.field-collection-table-view tr.odd,
+.print-content table.field-collection-table-view tr.even {
+  background: #ffffff!important;
+}
+
+.print-content table.field-collection-table-view td,
+.print-content table.field-collection-table-view th {
+}
+
+.print-content .field-name-field-dirt-bulk-density-calcs table {
+}
+
+/* shrink these down a bit to fit on page */
+.print-content .field-name-field-dirt-sample-before-drying table th,
+.print-content .field-name-field-dirt-sample-before-drying table td,
+.print-content .field-name-field-dirt-sample-after-drying table th,
+.print-content .field-name-field-dirt-sample-after-drying table td,
+.print-content .field-name-field-dirt-bulk-density-calcs table th,
+.print-content .field-name-field-dirt-bulk-density-calcs table td {
+  font-size: 12px;
+}
+
+.print-content table.field-collection-table-view td .field-items {
+  /* float property messes up column alignment */
+  float: none;
+}
+
+.print-content thead:before, thead:after { display: none; }
+.print-content tbody:before, tbody:after { display: none; }
+
+.print-content .field-name-field-dirt-date-of-survey .field-label {
+  float: none;
+}

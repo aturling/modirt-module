@@ -1,0 +1,11 @@
+.form-element-hidden { display: none; }
+#dirt-submission-note-save {
+  font-size: 16px;
+  color: rgb(165, 42, 42); 
+}
+span.dirt-save-warning-message { font-size: 16px; }
+.field-name-field-dirt-form-submission-note p { margin-bottom: 0px; }
+#modirt-submission-note-contact { font-style: italic; }
+div.field-name-field-dirt-form-header { margin-bottom: 0px; }
+.field-name-field-dirt-temp-cloud-cover label.form-item-title { display: none; }
+#edit-field-dirt-bulk-density-calcs table thead th div.top-half { border-bottom: none; }

@@ -1,0 +1,15 @@
+div.modirt-form-header {
+  width: 100%;
+  height: 200px;
+}
+div.modirt-form-header-img {
+  float: left;
+}
+div.modirt-form-header-text {
+  float: left;
+  margin-top: 20px;
+  margin-left: 10px;
+}
+.modirt-form-header-img img {
+  width: 150px;
+}

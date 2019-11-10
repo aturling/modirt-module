@@ -1,0 +1,15 @@
+#modirt-lab-results-table .modirt-table-lab {
+  width: 15%;
+}
+#modirt-lab-results-table .modirt-table-variable {
+  width: 25%;
+}
+#modirt-lab-results-table .modirt-table-description {
+  width: 50%;
+}
+#modirt-lab-results-table .modirt-table-value {
+  width: 10%;
+}
+#modirt-lab-results-table th, td {
+  text-align: center!important;
+}

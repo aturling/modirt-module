@@ -1,0 +1,316 @@
+<?php
+/*
+* @file
+* This is the main module file.
+*/
+
+
+/**
+ * Implements hook_theme().
+ *
+ * Normally this would go into theme directory but these changes
+ * should work for all themes and are specific to MO DIRT project.
+ */
+function modirt_print_theme($existing, $type, $theme, $path) {
+  $theme = array();
+  
+  // Simplify the page template for PDFs
+  $theme['print__pdf'] = array(
+    'render element' => 'page',
+    'base hook' => 'page',
+    'template' => 'page--modirt-print',
+    'path' => drupal_get_path('module', 'modirt_print') . '/templates',
+   );
+  // Use same theme for printer-friendly HTML as well
+  $theme['print__html'] = array(
+    'render element' => 'page',
+    'base hook' => 'page',
+    'template' => 'page--modirt-print',
+    'path' => drupal_get_path('module', 'modirt_print') . '/templates',
+   );
+
+  // Customizations to certain fields
+  $theme['print_field__field_dirt_site_geo_coords'] = array(
+    'render element' => 'field',
+    'base hook' => 'field',
+    'template' => 'print-field--field-dirt-site-geo-coords',
+    'path' => drupal_get_path('module', 'modirt_print') . '/templates',
+  );
+  $theme['print_field__field_dirt_site_layer_data'] = array(
+    'render element' => 'field',
+    'base hook' => 'field',
+    'template' => 'print-field--field-dirt-site-layer-data',
+    'path' => drupal_get_path('module', 'modirt_print') . '/templates',
+  );
+  $theme['print_field__field_dirt_site_drawing'] = array(
+    'render element' => 'field',
+    'base hook' => 'field',
+    'template' => 'print-field--field-dirt-site-drawing',
+    'path' => drupal_get_path('module', 'modirt_print') . '/templates',
+  );
+  $theme['print_field__field_dirt_site_habitat_photos'] = array(
+    'render element' => 'field',
+    'base hook' => 'field',
+    'template' => 'print-field--field-dirt-site-habitat-photos',
+    'path' => drupal_get_path('module', 'modirt_print') . '/templates',
+  );
+  $theme['print_field__field_dirt_temp_cloud_cover'] = array(
+    'render element' => 'field',
+    'base hook' => 'field',
+    'template' => 'print-field--field-dirt-temp-cloud-cover',
+    'path' => drupal_get_path('module', 'modirt_print') . '/templates',
+  );
+  $theme['print_field__field_dirt_color_number_by_hour'] = array(
+    'render element' => 'field',
+    'base hook' => 'field',
+    'template' => 'print-field--field-dirt-color-number-by-hour',
+    'path' => drupal_get_path('module', 'modirt_print') . '/templates',
+  );
+  $theme['print_field__field_dirt_co2c_room_temp_range'] = array(
+    'render element' => 'field',
+    'base hook' => 'field',
+    'template' => 'print-field--field-dirt-co2c-room-temp-range',
+    'path' => drupal_get_path('module', 'modirt_print') . '/templates',
+  );
+  $theme['print_field__field_dirt_co2c_field_temp_range'] = array(
+    'render element' => 'field',
+    'base hook' => 'field',
+    'template' => 'print-field--field-dirt-co2c-field-temp-range',
+    'path' => drupal_get_path('module', 'modirt_print') . '/templates',
+  );
+  $theme['print_field__field_dirt_sample_before_drying'] = array(
+    'render element' => 'field',
+    'base hook' => 'field',
+    'template' => 'print-field--field-dirt-sample-before-drying',
+    'path' => drupal_get_path('module', 'modirt_print') . '/templates',
+  );
+  $theme['print_field__field_dirt_sample_after_drying'] = array(
+    'render element' => 'field',
+    'base hook' => 'field',
+    'template' => 'print-field--field-dirt-sample-after-drying',
+    'path' => drupal_get_path('module', 'modirt_print') . '/templates',
+  );
+  $theme['print_field__field_dirt_bulk_density_calcs'] = array(
+    'render element' => 'field',
+    'base hook' => 'field',
+    'template' => 'print-field--field-dirt-bulk-density-calcs',
+    'path' => drupal_get_path('module', 'modirt_print') . '/templates',
+  );
+
+
+  // Move this one to theme eventually:
+  $theme['field__text'] = array(
+    'render element' => 'field',
+    'base hook' => 'field',
+    'template' => 'field--text',
+    'path' => drupal_get_path('module', 'modirt_print') . '/templates',
+  );
+
+  return $theme;
+}
+
+
+/**
+ * Implements hook_preprocess_field().
+ *
+ * Add template suggestions for fields in print view mode.
+ */
+function modirt_print_preprocess_field(&$variables, $hook) {
+  $element = $variables['element'];
+
+  if ($element['#view_mode'] == PRINT_VIEW_MODE)
+    $variables['theme_hook_suggestions'][] = 'print_field__' . $element['#field_name'];
+}
+
+
+/**
+ * Implements hook_node_view().
+ *
+ * Add custom CSS to node views for survey nodes.
+ */
+function modirt_print_node_view($node, $view_mode, $langcode) {
+  $type = $node->type;
+
+  // Add CSS to survey nodes
+  if (dirt_node_type_is_survey_type($type))
+    drupal_add_css(drupal_get_path('module', 'modirt_print') . '/css/modirt_print_overrides.css');
+}
+
+
+/**
+ * Implements hook_field_group_info().
+ *
+ * Add field groups to print view mode.
+ */
+function modirt_print_field_group_info() {
+  module_load_include('inc', 'modirt_print', 'includes/modirt_print.field_groups');
+
+  // Get field group info with print view mode
+  $field_groups = modirt_print_get_field_group_info();
+
+  // Get group objects for export
+  $export = modirt_print_get_field_group_objects($field_groups);
+
+  // Make customizations to field groups for print view
+  modirt_print_customize_field_groups($export);
+
+  return $export;
+}
+
+
+
+/**
+ * Implements hook_ctools_plugin_api().
+ */
+function modirt_print_ctools_plugin_api($owner, $api) {
+  if ($owner == 'field_group' && $api == 'field_group') {
+    return array('version' => 1);
+  }
+}
+
+
+/**
+ * Returns array of field group objects for print view mode. Excludes
+ * some of the field groups from default view mode to simplify the
+ * print output. 
+ *
+ * @param[in] $field_groups Array of field group info, each with keys
+ * 'basename', 'bundle', and 'mode'.
+ *
+ * @retval Array of field group objects.
+ */
+function modirt_print_get_field_group_objects($field_groups) {
+  module_load_include('inc', 'dirt', 'includes/dirt.field_groups');
+  module_load_include('inc', 'modirt', 'includes/modirt.field_groups');
+
+  // Initialize return
+  $export = array();
+
+  // Exclude these groups in print view mode
+  $groups_to_exclude = array(
+    'group_dirt_site_coords',
+    'group_dirt_site_desc_con',
+    'group_dirt_site_habitat',
+    'group_dirt_site_updates',
+    'group_dirt_site_soilcore',
+    'group_dirt_site_drawing',
+    'group_dirt_site_photos',
+    'group_dirt_temp_cloud',
+    'group_dirt_soil_resp',
+    'group_dirt_co2c',
+    'group_dirt_soil_sample',
+    'group_dirt_before_drying',
+    'group_dirt_after_drying',
+    'group_dirt_bulk_density',
+    'group_dirt_admin_only',
+    'group_dirt_user_admin',
+  );
+
+  foreach($field_groups as $group_info) {
+    if (!in_array($group_info['basename'], $groups_to_exclude)) {
+      $group = '';
+
+      // If lab results survey, use appropriate function from MO DIRT module
+      if ($group_info['bundle'] == 'modirt_lab_results_survey')
+        $group = modirt_get_field_group_object($group_info['basename'], $group_info['bundle'], $group_info['mode']);
+      else 
+        $group = dirt_get_field_group_object($group_info['basename'], $group_info['bundle'], $group_info['mode']);
+
+      if (!empty($group)) {
+        $key = $group->identifier;
+        $export[$key] = $group;
+      }
+    }
+  }
+
+  return $export;
+}
+
+
+/**
+ * Customizes the array of field group objects for the print view mode. Changes
+ * all fieldsets to divs, modifies parent/child relationships for some field
+ * groups and resets some group weights.
+ *
+ * @param[in,out] $export Array of field group objects.
+ */
+function modirt_print_customize_field_groups(&$export) {
+  $mode = PRINT_VIEW_MODE;
+
+  // Change fieldsets to divs (collapsible so that labels are displayed)
+  foreach($export as $key => $group) {
+    $export[$key]->data['format_type'] = 'div';
+    $export[$key]->data['format_settings']['formatter'] = 'collapsible';
+  }
+
+  // Change parent/child relationships for certain groups
+  $export['group_dirt_site_desc_' . $mode . '|node|dirt_site_description_survey|' . $mode]->data['children'] = array(
+    'field_dirt_site_mean_annual_temp',
+    'field_dirt_site_annual_precip',
+    'field_dirt_site_elevation',
+    'field_dirt_site_slope',
+    'field_dirt_site_aspect',
+    'field_dirt_site_geo_coords',
+    'field_dirt_site_map_unit_name',
+    'field_dirt_site_map_unit_symbol',
+    'field_dirt_site_landscape_posit',
+    'field_dirt_site_habitat_type',
+    'field_dirt_site_type_of_crop',
+    'field_dirt_site_cropping_system',
+    'field_dirt_site_topography',
+    'field_dirt_site_present_manage',
+    'field_dirt_site_past_manage',
+    'field_dirt_site_manage_updates',
+  );
+
+  $export['group_dirt_co2c_' . $mode . '|node|dirt_monthly_data_survey|' . $mode]->data['children'] = array(
+    'field_dirt_co2c_room_temp_range',
+    'field_dirt_co2c_field_temp_range',
+  );
+
+  $export['group_dirt_chem_soil_' . $mode . '|node|dirt_twice_year_data_survey|' . $mode]->data['children'] = array(
+    'field_dirt_soil_n',
+    'field_dirt_soil_p',
+    'field_dirt_soil_k',
+    'field_dirt_soil_ph',
+    'field_dirt_soil_active_carbon',
+    'field_dirt_soil_organic_matter',
+  );
+
+  // Change some group weights
+  $export['group_dirt_co2c_' . $mode . '|node|dirt_monthly_data_survey|' . $mode]->data['weight'] = 6;
+  $export['group_dirt_before_drying_' . $mode . '|node|dirt_monthly_data_survey|' . $mode]->data['weight'] = 10;
+  $export['group_dirt_after_drying_' . $mode . '|node|dirt_monthly_data_survey|' . $mode]->data['weight'] = 11;
+}
+
+
+/**
+ * Implements hook_page_alter().
+ *
+ * Adds PDF view links to data entry portal page.
+ */
+function modirt_print_page_alter(&$page) {
+  // Alter data entry portal page
+  $at_data_portal_page = (current_path() === variable_get('dirt_data_entry_portal_path'));
+
+  if ($at_data_portal_page) {
+    // Table won't exist for non data entry users, so check first
+    $table_exists = array_key_exists('survey_history_table', $page['content']['system_main']);
+ 
+    if ($table_exists) {
+      $rows = $page['content']['system_main']['survey_history_table']['#rows'];
+  
+      foreach($rows as $idx => $row) {
+        // Links in column index 2
+        $view_link = $row['data'][2]['data'];
+        preg_match('/node\/(\d+)/', $view_link, $matches);
+        if (!empty($matches)) {
+          $nid = $matches[1];
+          $new_links = l('HTML', 'node/' . $nid) . ' | ' . l('PDF', 'printpdf/' . $nid);
+          $page['content']['system_main']['survey_history_table']['#rows'][$idx]['data'][2]['data'] = $new_links;
+        } 
+      }
+    }
+  }
+}
+
