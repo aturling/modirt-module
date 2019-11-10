@@ -13,16 +13,19 @@ search portal map center to the center of Missouri, etc.
 
 ## Uses
 
-* Collecting citizen science survey data in Missouri
+* *Collecting citizen science survey data in Missouri*
+
 This module customizes the core DIRT module to set the collection location to 
 the state of Missouri.
 
-* Collecting soil lab data
+* *Collecting soil lab data*
+
 A new survey type is added to store the results of soil lab analysis variables. 
 New variable filters and column groups in the data search portal table are 
 added for the lab data.
 
-* Updating select site description fields
+* *Updating select site description fields*
+
 The site description survey is modified to allow some fields to be updated from 
 time to time as needed, e.g., present and past land management.
 
