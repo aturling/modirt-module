@@ -30,8 +30,9 @@ time to time as needed, e.g., present and past land management.
 ## Requirements
 
 The MO DIRT module requires DIRT and DIRT DataTable, along with the following 
-contributed module:
+contributed modules:
 
+* Honeypot (https://www.drupal.org/project/honeypot)
 * Views (https://www.drupal.org/project/views)
 
 Additionally, the following library is required:
