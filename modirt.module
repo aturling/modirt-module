@@ -254,9 +254,11 @@ function modirt_node_view_alter(&$build) {
       case 'modirt_lab_results_survey':
         // For lab survey types, change "Submitted by" to "Created
         // for" since participants don't submit the lab results themselves.
-        $submitted_by_markup = $build['dirt_submitted_by']['#markup'];
-        $altered_markup = str_replace('Submitted by', 'Created for', $submitted_by_markup);
-        $build['dirt_submitted_by']['#markup'] = $altered_markup;
+        if (array_key_exists('dirt_submitted_by', $build)) {
+          $submitted_by_markup = $build['dirt_submitted_by']['#markup'];
+          $altered_markup = str_replace('Submitted by', 'Created for', $submitted_by_markup);
+          $build['dirt_submitted_by']['#markup'] = $altered_markup;
+        }
         break;
     }
   }
@@ -321,14 +323,18 @@ function modirt_field_group_info() {
 /**
  * Implements hook_module_implements_alter().
  *
- * Ensures that modirt form alter is called after dirt form alter.
+ * Ensures that modirt form and node view alter functions are called after dirt
+ * form and node view alter, since modirt makes additional alterations to
+ * forms/node views after dirt.
  *
  * @param[in,out] $implementations An array keyed by the module's name.
  * @param[in] $hook The name of the module hook being implemented.
  */
 function modirt_module_implements_alter(&$implementations, $hook) {
-  if ( ($hook == 'form_alter') && array_key_exists('modirt', $implementations)) {
-    // Move modirt's form alter to the end of the list:
+  $hooks = array('form_alter', 'node_view_alter');
+
+  if (in_array($hook, $hooks) && array_key_exists('modirt', $implementations)) {
+    // Move modirt's hook to the end of the list:
     $group = $implementations['modirt'];
     unset($implementations['modirt']);
     $implementations['modirt'] = $group; 
